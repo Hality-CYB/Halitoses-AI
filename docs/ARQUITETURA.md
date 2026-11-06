@@ -1,8 +1,8 @@
 # Hality — documentação técnica
 
 Contrato dos módulos, protocolo de dados e resultados medidos.
-Para a visão geral, ver `README.md`. Para o racional das decisões, ver
-`docs/superpowers/specs/2026-08-28-hality-redesign-design.md`.
+Para a visão geral, ver `SISTEMA.md` ou `WIKI.md`. Para o racional das decisões, ver
+`DECISOES.md`.
 
 ---
 
@@ -142,9 +142,10 @@ fora da distribuição em que as métricas valem.
 
 ### `segment(img) -> (mask: ndarray[H,W] bool, conf: float)`
 
-Interface estável independentemente da implementação. Primeira opção é TongueSAM
-(MIT, pesos pré-treinados, zero-shot). Alternativa é treinar sobre BioHit e TongueSet3
-somados às máscaras boas do projeto.
+Interface estável independentemente da implementação. Implementada em
+`hality/segmentacao.py`: TongueNet (DeepLabV3 ResNet50, entrada 384×384,
+`models/tonguenet.pt`) quando o peso existe, e U-Net de reserva (`models/segmentador.pt`)
+quando não existe. A máscara sai em 128×128.
 
 Substitui a chamada à API da Roboflow do pipeline anterior, que implicava latência de
 rede por requisição, custo por chamada e envio de imagem clínica a terceiro.
@@ -276,6 +277,14 @@ Todos os números vêm de execuções neste repositório.
 
 ### 5.1 Desempenho do Modelo B
 
+Medição atual, com o TongueNet: validação cruzada repetida sobre 306 fotos, 5 folds × 20
+repetições, AUC **0,77**, intervalo 0,68 a 0,86. Pipeline completo sobre validação e
+teste (n = 93): cobertura 72,0%, acurácia 0,776, F1 macro 0,759, sensibilidade 0,875,
+especificidade 0,630, AUC 0,748.
+
+As tabelas abaixo são da medição anterior ao TongueNet, com a U-Net, e seguem válidas
+como comparação entre entradas e pontos de operação.
+
 Validação cruzada estratificada repetida, 5 folds × 10 repetições, tarefa
 `classe 3 vs resto`:
 
@@ -377,7 +386,7 @@ externos.
 
 ### 6.1 Tamanho da amostra
 
-318 imagens utilizáveis. Um conjunto de teste de 15% tem 48 exemplos, o que equivale a
+306 imagens utilizáveis. Um conjunto de teste de 15% tem 48 exemplos, o que equivale a
 cerca de ±7 pontos de ruído em acurácia. Métrica de ponto único não é informativa nesse
 tamanho.
 
@@ -400,6 +409,9 @@ Inspeção visual de 36 imagens amostradas nos extremos e na mediana da fração
 
 Nas imagens de área baixa a língua está nítida e centralizada, mas a máscara capturou
 apenas um fragmento, tipicamente sobre a mancha de saburra. A falha é de um lado só.
+
+O TongueNet recupera a língua inteira em 14 das 15 fotos em que a segmentação antiga só
+encontrava fragmentos.
 
 ### 6.3 Cobertura de um único ambiente
 
@@ -440,7 +452,7 @@ relatório final traz a curva de métrica contra cobertura, não um ponto isolad
 
 ## 7. Ambiente
 
-Python 3.12, PyTorch em CPU. Ver `README.md` para instalação.
+Python 3.12, PyTorch em CPU. Ver `README.md` para instalação e para a imagem Docker.
 
 **Python 3.14 não é utilizável.** O PyTorch instalado nele apresenta falha de
 segmentação no passo de backward, e `torchvision` não tem distribuição.
@@ -480,7 +492,8 @@ O item 6 exige rotação da credencial, independentemente do cronograma do redes
 | 1 | Protocolo de medição do rótulo (seção 1.2) | A afirmação que o produto pode fazer |
 | 2 | Rotação da chave da Roboflow | Nada; é urgente por si |
 | 3 | Verificar TCM-Tongue com o teste de metadados | Uso do dataset externo |
-| 4 | Correção manual das ~12 máscaras sub-segmentadas | Recuperação de 4% do conjunto |
+| 4 | Retreinar o TongueNet sem as fotos de validação e teste do classificador | Números honestos do pipeline |
+| 5 | Reduzir a troca de veredito entre refotos (23,3%) | Confiança do usuário no resultado |
 
 O enunciado de `Q1`–`Q10` deixou de ser pendência: os enunciados não estão disponíveis,
 e a consequência já foi absorvida no desenho — a anamnese saiu do modelo (seção 1.3).

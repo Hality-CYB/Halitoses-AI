@@ -1,7 +1,8 @@
 # Hality — como o sistema funciona
 
 Visão geral das etapas, do que entra em cada uma e do porquê de cada decisão.
-Para o contrato dos módulos, ver `ARQUITETURA.md`.
+Para o contrato dos módulos, ver `ARQUITETURA.md`. Para o racional das decisões, ver
+`DECISOES.md`. A página da wiki fica em `WIKI.md`.
 
 ---
 
@@ -30,7 +31,7 @@ Para o contrato dos módulos, ver `ARQUITETURA.md`.
                             ▼
         ┌───────────────────────────────────────────────┐
    4    │ SEGMENTAÇÃO E ISOLAMENTO                      │
-        │ U-Net própria → máscara da língua             │
+        │ TongueNet (DeepLabV3) → máscara da língua     │
         └───────────────────┬───────────────────────────┘
                             ▼
         ┌───────────────────────────────────────────────┐      ✗ "aproxime a câmera"
@@ -54,6 +55,9 @@ Para o contrato dos módulos, ver `ARQUITETURA.md`.
             ▼              ▼                ▼
         "indício"    "sem indício"   "inconclusivo"
 ```
+
+As etapas 2 a 7 rodam cinco vezes, sobre variações geométricas da mesma foto, e a
+decisão final é o voto de maioria entre elas.
 
 Quatro saídas por rejeição antes de qualquer estimativa, mais a abstenção no fim.
 **Rejeitar é resposta bem-sucedida do sistema**, não erro — e sempre com um motivo
@@ -165,17 +169,20 @@ não existe no conjunto e **não foi testado**.
 
 ## Etapa 4 — Segmentação e isolamento
 
-Uma U-Net própria de 483 mil parâmetros, treinada nas máscaras do projeto, IoU 0,842 na
-validação.
+O segmentador principal é o TongueNet, um DeepLabV3 com backbone ResNet50 treinado nas
+fotos da clínica: IoU 0,903 contra máscara de especialista (BioHit, n = 30). Se o peso
+`models/tonguenet.pt` não existir, o sistema cai para a U-Net de reserva, de 483 mil
+parâmetros, IoU 0,729 no mesmo conjunto. `GET /saude` informa qual está carregado.
 
-Ela substitui a chamada à API da Roboflow que o pipeline anterior fazia. Isso é
+A U-Net substituiu a chamada à API da Roboflow que o pipeline anterior fazia. Isso é
 destilação: herdamos o teto de qualidade daquela API, mas eliminamos a latência de rede
 por foto, o custo por chamada, uma chave exposta em texto claro no notebook, e o envio
 de imagem clínica a um terceiro.
 
 ### Antes e depois nas três línguas mais difíceis
 
-Estas três estavam entre as 15 fotos que a segmentação anterior não conseguia isolar —
+Comparação feita com a U-Net, antes do TongueNet. Estas três estavam entre as 15 fotos
+que a segmentação anterior não conseguia isolar —
 todas com máscara cobrindo menos de 2% do quadro, embora a língua esteja visível.
 
 ![Comparação de segmentação](img/segmentacao_antes_depois.png)
@@ -194,8 +201,9 @@ a Roboflow — que nestes casos encontrou praticamente nada — porém ainda cap
 fragmentos, não a língua inteira. Nas três, o resultado continua errado.
 
 O que elas têm em comum é iluminação ruim: língua em sombra dentro da boca, contraste
-baixo entre a língua e o fundo da cavidade. É o mesmo problema que a captura resolveria
-na origem e que nenhum modelo conserta depois.
+baixo entre a língua e o fundo da cavidade.
+
+O TongueNet resolve a maior parte: das 15 fotos difíceis, recupera a língua inteira em 14.
 
 ---
 
@@ -211,7 +219,8 @@ descartado justamente as melhores fotos.
 
 ### Por que descartamos imagens, e onde isso ainda falha
 
-Das 15 imagens que a segmentação antiga não resolvia, passadas pelo pipeline completo:
+Das 15 imagens que a segmentação antiga não resolvia, passadas pelo pipeline completo
+com a U-Net:
 
 | Desfecho | Quantidade | Correto? |
 |---|---|---|
@@ -225,8 +234,10 @@ critérios atuais são permissivos demais: um fragmento único e coerente cobrin
 quadro passa tanto no teste de área quanto no de fragmentação, mesmo sendo só um pedaço
 do órgão.
 
-É um defeito aberto. A correção provável é comparar a área prevista contra a
-distribuição esperada, em vez de usar um piso fixo.
+Com o TongueNet, 14 das 15 passam a ter a língua inteira na máscara, o que remove a
+maior parte dessas falhas silenciosas. A regra de sanidade continua permissiva para um
+fragmento grande e coerente, e a correção provável segue sendo comparar a área prevista
+contra a distribuição esperada, em vez de usar um piso fixo.
 
 ---
 
@@ -318,8 +329,15 @@ A anamnese **não entra**. Sem a pergunta Q6 ela contribui 0,002 de AUC, e Q6 n�
 auditada porque os enunciados do questionário não estão disponíveis. A entrada do
 sistema é apenas a fotografia.
 
-A faixa central de probabilidade devolve **inconclusivo**. Descartando os 20% mais
-incertos, a acurácia sobe de 0,73 para 0,79 nos casos cobertos.
+A faixa `limiar ± 2 × 0,043` devolve **inconclusivo**, com 0,043 sendo o ruído medido
+entre refotos da mesma língua.
+
+O classificador roda sobre as cinco variações da foto e o veredito é por maioria. Sem
+maioria clara, a resposta é inconclusivo. Isso reduziu a troca de veredito entre refotos
+de 48,3% para 23,3%.
+
+A API também devolve uma `classe` de 1 a 3: 3 se a probabilidade passa do limiar, 2 se
+passa da metade do limiar, 1 abaixo disso.
 
 ---
 
@@ -343,17 +361,18 @@ com a avaliação daquela clínica*, não acurácia diagnóstica.
 
 | Componente | Métrica |
 |---|---|
-| Segmentador | IoU 0,842 |
-| Classificador — CV repetida (n=318) | AUC 0,797 [0,779 – 0,820] |
-| Classificador — teste trancado (n=48) | AUC 0,871 |
-| Classificador — validação (n=43) | AUC 0,700 |
+| Segmentador TongueNet — especialista BioHit (n=30) | IoU 0,903 |
+| Classificador — CV repetida (n=306, 5 folds × 20) | AUC 0,77 [0,68 – 0,86] |
+| Pipeline completo — validação + teste (n=93) | cobertura 72,0%, acurácia 0,776 |
+| Pipeline completo — validação + teste (n=93) | sensibilidade 0,875, especificidade 0,630 |
+| Pipeline completo — validação + teste (n=93) | F1 macro 0,759, AUC 0,748 |
 | Gate — recall nas fotos próprias | 97,8% |
 | Gate — falso-aceite no COCO | 0,0% |
 
-**O número a citar é ~0,80.** As três estimativas do mesmo classificador variam de 0,700
-a 0,871; com ~45 exemplos por partição o intervalo de confiança é da ordem de ±0,10, e
-esse espalhamento é ruído, não melhora. A estimativa que sustenta é a da validação
-cruzada repetida sobre as 318 amostras.
+**O número a citar é 0,77**, da validação cruzada repetida. Com cerca de 45 exemplos por
+partição, o intervalo de uma partição única é da ordem de ±0,10, e esse espalhamento é
+ruído, não melhora. Os números do pipeline completo estão otimistas: o TongueNet foi
+treinado com fotos que incluem as de validação e teste do classificador.
 
 Isso coloca o projeto na faixa da literatura para condição sistêmica estimada por foto
 de língua — lesão pré-cancerosa gástrica 0,75, doença coronariana 0,786 — com um
@@ -362,12 +381,13 @@ sulfurados voláteis.
 
 ## Falhas abertas
 
-1. **Seis das quinze imagens difíceis recebem veredito confiante** a partir de um
-   fragmento de língua. A sanidade da máscara é permissiva demais.
-2. **Especificidade 0,500** no ponto de operação atual: metade dos casos sem indício é
-   sinalizada.
-3. **O gate nunca viu um rosto de boca fechada.** Seus negativos são cenas do COCO.
-4. **Todas as fotos vêm de um único ambiente clínico.** A variação disponível é de
+1. **23,3% das refotos ainda mudam de veredito.** É o principal item aberto.
+2. **O TongueNet viu as fotos de validação e teste do classificador.** Os números do
+   pipeline ficam otimistas até um retreino sem elas.
+3. **Especificidade 0,630** no ponto de operação atual: mais de um terço dos casos sem
+   indício é sinalizado.
+4. **O gate nunca viu um rosto de boca fechada.** Seus negativos são cenas do COCO.
+5. **Todas as fotos vêm de um único ambiente clínico.** A variação disponível é de
    aparelho, não de cenário, e não há como estimar a queda em captura doméstica.
-5. **O protocolo de medição do rótulo é desconhecido.** É a pendência que define o que o
+6. **O protocolo de medição do rótulo é desconhecido.** É a pendência que define o que o
    produto pode afirmar.

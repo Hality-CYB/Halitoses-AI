@@ -24,9 +24,6 @@ CATALOGO: dict[str, Instancia] = {i.nome: i for i in (
     Instancia("g4dn.xlarge", 4, 16),
 )}
 
-NENHUMA = "nenhuma"
-
-
 def buscar(nome: str) -> Instancia:
     try:
         return CATALOGO[nome]
@@ -46,14 +43,6 @@ def rss_bytes() -> int:
     return 0
 
 
-def ram_total_bytes() -> int:
-    with open("/proc/meminfo") as f:
-        for linha in f:
-            if linha.startswith("MemTotal:"):
-                return int(linha.split()[1]) * 1024
-    return 0
-
-
 def demo() -> None:
     assert buscar("c7i.xlarge").vcpus == 4
     try:
@@ -64,7 +53,6 @@ def demo() -> None:
         raise AssertionError("aceitou instancia inexistente")
     assert 1 <= threads_para(buscar("c7i.4xlarge")) <= (os.cpu_count() or 16)
     assert rss_bytes() > 0
-    assert ram_total_bytes() > rss_bytes()
     print("ok - catalogo de instancias")
 
 

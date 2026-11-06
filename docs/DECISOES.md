@@ -10,11 +10,13 @@ código. O código não repete estas justificativas: elas moram aqui.
 | `hality/features.py` | 1, 2 |
 | `hality/data.py` | 3, 4 |
 | `hality/segmenter.py`, `train_segmenter.py` | 5, 6 |
+| `hality/segmentacao.py` | 13, 20 |
 | `hality/train_gate.py` | 7, 8 |
 | `hality/train_classifier.py` | 9, 10 |
 | `hality/pipeline.py` | 11, 12, 13, 14, 15 |
 | `hality/coating.py`, `raios.py` | 16, 17 (resultados negativos) |
 | `hality/sam_segmenter.py`, `sam_onnx.py` | 18, 19 |
+| `hality/api.py`, `instancias.py` | 21 |
 
 ---
 
@@ -300,6 +302,33 @@ decoder recebe uns poucos pontos e roda em microssegundos.
 encoder CPU (PyTorch):   5,80 s/imagem
 encoder GPU (DirectML):  0,16 s/imagem      35,3x
 ```
+
+## 20. TongueNet como segmentador principal, U-Net como reserva
+
+| Segmentador | IoU contra especialista (BioHit, n = 30) | IoU contra Roboflow (validação, n = 45) |
+|---|---|---|
+| TongueNet | **0,903** | 0,823 |
+| U-Net | 0,729 | 0,843 |
+
+A U-Net ganha contra a Roboflow porque foi destilada dela, defeitos inclusos. Contra a
+máscara de especialista o TongueNet ganha com folga, e é essa a régua honesta. Nas 15
+fotos em que a segmentação antiga achava só fragmentos, o TongueNet recupera a língua
+inteira em 14.
+
+A U-Net fica como reserva: se `models/tonguenet.pt` não existir, o sistema sobe com ela.
+
+Custo conhecido: o TongueNet foi treinado com fotos que incluem as de validação e teste
+do classificador, então os números do pipeline estão otimistas até um retreino sem elas.
+
+## 21. Simulação de instância EC2 na API
+
+Para dimensionar a máquina de produção sem alugar cada uma, a API aceita o campo
+`instancia` em `POST /analisar` (ex.: `c7i.xlarge`) quando sobe com `HALITY_SIMULACAO=1`.
+A análise roda com o número de threads do PyTorch limitado aos vCPUs da instância, e a
+resposta traz `tempo_ms`, a RAM do processo e se ela cabe em 85% da RAM da instância.
+
+Desligada por padrão, porque troca o número de threads do processo: as análises
+simuladas são serializadas por uma trava para não interferirem entre si.
 
 ---
 

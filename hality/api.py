@@ -12,9 +12,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from PIL import Image
-from prometheus_client import Counter, Gauge, Histogram, make_asgi_app
 
-from .instancias import NENHUMA, Instancia, buscar, ram_total_bytes, rss_bytes, threads_para
+from .instancias import Instancia, buscar, rss_bytes, threads_para
 from .pipeline import Hality
 
 TAMANHO_MAX = 20 * 1024 * 1024
@@ -24,24 +23,6 @@ FOLGA_RAM = 0.85
 
 _modelo: Hality | None = None
 _trava_simulacao = threading.Lock()
-
-REQUISICOES = Counter("hality_requisicoes_total", "Analises concluidas",
-                      ["veredito", "classe", "instancia"])
-LATENCIA = Histogram("hality_latencia_segundos", "Tempo de analise", ["instancia"],
-                     buckets=(0.25, 0.5, 1, 2, 3, 5, 8, 12, 20, 30, 60))
-INSTANCIA_ATUAL = Gauge("hality_instancia_simulada", "Instancia EC2 simulada na ultima analise",
-                        ["instancia"])
-VCPUS = Gauge("hality_vcpus_instancia", "vCPUs da instancia simulada")
-RAM_INSTANCIA = Gauge("hality_ram_instancia_bytes", "RAM da instancia simulada")
-THREADS = Gauge("hality_threads_torch", "Threads do torch na ultima analise")
-
-
-def _publicar_instancia(nome: str, vcpus: int, ram_bytes: int) -> None:
-    INSTANCIA_ATUAL.clear()
-    INSTANCIA_ATUAL.labels(nome).set(1)
-    VCPUS.set(vcpus)
-    RAM_INSTANCIA.set(ram_bytes)
-
 
 def _aquecer(m: Hality) -> None:
     buf = io.BytesIO()
@@ -53,12 +34,10 @@ def _aquecer(m: Hality) -> None:
 
 def _executar(raw: bytes, inst: Instancia | None):
     if inst is None:
-        THREADS.set(torch.get_num_threads())
         return _modelo.analisar(raw)
     with _trava_simulacao:
         anterior = torch.get_num_threads()
         torch.set_num_threads(threads_para(inst))
-        THREADS.set(torch.get_num_threads())
         try:
             return _modelo.analisar(raw)
         finally:
@@ -70,7 +49,6 @@ async def ciclo(app: FastAPI):
     global _modelo
     _modelo = Hality()
     await run_in_threadpool(_aquecer, _modelo)
-    _publicar_instancia(NENHUMA, os.cpu_count() or 0, ram_total_bytes())
     yield
 
 
@@ -80,7 +58,6 @@ app = FastAPI(
     version="0.3.0",
     lifespan=ciclo,
 )
-app.mount("/metrics", make_asgi_app())
 
 
 @app.get("/saude")
@@ -123,16 +100,9 @@ async def analisar(
     if _modelo is None:
         raise HTTPException(503, "Modelos ainda carregando.")
 
-    nome = inst.nome if inst else NENHUMA
-    if inst:
-        _publicar_instancia(inst.nome, inst.vcpus, inst.ram_gb * 1024 ** 3)
-
     t0 = time.perf_counter()
     r = await run_in_threadpool(_executar, raw, inst)
     dt = time.perf_counter() - t0
-
-    LATENCIA.labels(nome).observe(dt)
-    REQUISICOES.labels(r.veredito, str(r.classe or "-"), nome).inc()
 
     corpo = r.dict()
     corpo["arquivo"] = foto.filename

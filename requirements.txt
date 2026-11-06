@@ -10,4 +10,3 @@ torch==2.13.0+cpu
 torchvision==0.28.0+cpu
 transformers==5.16.1
 uvicorn==0.52.4
-prometheus_client==0.26.0

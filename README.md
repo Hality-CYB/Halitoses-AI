@@ -71,7 +71,7 @@ sem internet. Ela é distribuída como asset do release, porque os pesos passam 
 foram treinados com dados de pacientes. Não redistribua fora do grupo.
 
 ```bash
-gh release download v0.2.0 --repo EduardoAlcaria/HalitosisScan --pattern "hality-ai.tar.gz"
+gh release download v0.2.0 --repo Hality-CYB/Halitoses-AI --pattern "hality-ai.tar.gz"
 docker load -i hality-ai.tar.gz
 docker run -d --name hality-ai -p 8000:8000 --restart unless-stopped hality-ai:latest
 ```

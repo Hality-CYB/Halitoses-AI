@@ -30,20 +30,5 @@ services:
     ports:
       - "9835:9835"
 
-  grafana:
-    image: grafana/grafana:12.1.0
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: hality
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/hality.json
-    volumes:
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - grafana-data:/var/lib/grafana
-    network_mode: host
-    depends_on:
-      - prometheus
-
 volumes:
   prometheus-data:
-  grafana-data:
